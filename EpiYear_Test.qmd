@@ -1,0 +1,272 @@
+---
+title: "Untitled"
+format: html
+---
+## Import data
+
+```{r message=FALSE, echo=FALSE, warning=FALSE}
+library(tidyverse)
+library(janitor)
+library(stringr)
+library(ggplot2)
+library(digest)
+library(googlesheets4)
+library(googledrive)
+library(gt)
+library(ggrepel)
+
+load_data <- function(url, sheet) {
+  gs4_deauth()
+  df <- read_sheet(url, sheet = sheet)
+  return(df)
+}
+
+sxh_cases <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "ca")
+sxh_inp <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "noi")
+sxh_sev <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "nang")
+
+
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+tcm_inp <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "noi")
+tcm_sev <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "nang")
+```
+
+```{r}
+theme_hcdc_report <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      text = element_text(color = "black"),
+      axis.text = element_text(color = "black", size = 12),
+      axis.title = element_text(color = "black", size = 14, face = "bold"),
+      plot.title = element_text(color = "black", size = 16, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(color = "black", size = 13, hjust = 0.5, margin = margin(b = 10)),
+      legend.text = element_text(color = "black", size = 12),
+      legend.title = element_text(color = "black", size = 12, face = "bold"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white", color = NA)
+    )
+}
+
+gather_sxh <- function(df, val_name) {
+  df %>%
+    pivot_longer(cols = -Week, names_to = "Year", values_to = val_name) %>%
+    mutate(Year = as.numeric(Year))
+}
+
+df_full <- gather_sxh(sxh_cases, "Cases") %>%
+  left_join(gather_sxh(sxh_inp, "Inp"), by = c("Week", "Year")) %>%
+  left_join(gather_sxh(sxh_sev, "Sev"), by = c("Week", "Year"))
+
+# Tính toán các Feature của từng năm
+df_yearly <- df_full %>%
+  arrange(Year, Week) %>%
+  group_by(Year) %>%
+  summarise(
+    Total_Cases = sum(Cases, na.rm = TRUE),
+    Peak_Cases = max(Cases, na.rm = TRUE),
+    Max_Accel = max(Cases - lag(Cases, default = 0), na.rm = TRUE),
+    Total_Inp = sum(Inp, na.rm = TRUE),
+    Total_Sev = sum(Sev, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Pct_Inp = (Total_Inp / Total_Cases) * 100, ## Tỷ lệ ca nội trú
+    Pct_Sev = (Total_Sev / Total_Cases) * 100 ## Tỷ lệ ca nặng
+  )
+
+df_yearly <- df_yearly %>% filter(Year != 2026)
+```
+ 
+## Cách 1: Dựa trên tỷ lệ ca nặng
+
+```{r}
+tbl_severity <- df_yearly %>%
+  select(Year, Total_Cases, Total_Sev, Pct_Sev, Total_Inp, Pct_Inp) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Bảng 1: Tỷ lệ ca nặng và nhập viện qua các năm**")
+  ) %>%
+  fmt_number(columns = c(Total_Cases, Total_Sev, Total_Inp), decimals = 0, use_seps = TRUE) %>%
+  fmt_number(columns = c(Pct_Sev, Pct_Inp), decimals = 2) %>%
+  cols_label(
+    Year = "Năm", Total_Cases = "Tổng ca", Total_Sev = "Số ca Nặng", 
+    Pct_Sev = "Tỷ lệ Nặng (%)", Total_Inp = "Số ca Nhập viện", Pct_Inp = "Tỷ lệ Nhập viện (%)"
+  )
+
+plot_severity <- ggplot(df_yearly, aes(x = Year, y = Pct_Sev)) +
+  geom_line(color = "#1D3557", size = 1.2) +
+  geom_point(color = "#E63946", size = 4) +
+  geom_text_repel(aes(label = paste0(round(Pct_Sev, 1), "%")), 
+                  size = 5, color = "black", fontface = "bold", vjust = -1.5) +
+  scale_x_continuous(breaks = unique(df_yearly$Year)) +
+  labs(
+    title = "Biến động tỷ lệ Sốt xuất huyết Dengue nặng qua các năm",
+    subtitle = "Những đỉnh cao bất thường có thể chỉ điểm năm dịch với độc lực cao",
+    x = "Năm", y = "Tỷ lệ ca nặng (%)"
+  ) +
+  theme_hcdc_report()
+
+tbl_severity
+
+plot_severity
+```
+
+## Cách 2: Xem outlier của số ca, đỉnh dịch và tốc độ gia tăng của số ca
+
+```{r}
+# Tính ngưỡng Outlier (Upper Fence = Q3 + 1.5*IQR) cho 3 chỉ số
+get_outliers <- function(x) {
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+  return(q3 + 1.5 * iqr)
+}
+
+thresh_cases <- get_outliers(df_yearly$Total_Cases)
+thresh_peak <- get_outliers(df_yearly$Peak_Cases)
+thresh_accel <- get_outliers(df_yearly$Max_Accel)
+
+df_yearly <- df_yearly %>%
+  mutate(
+    Outlier_Cases = ifelse(Total_Cases > thresh_cases, "Yes", "No"),
+    Outlier_Peak = ifelse(Peak_Cases > thresh_peak, "Yes", "No"),
+    Outlier_Accel = ifelse(Max_Accel > thresh_accel, "Yes", "No")
+  )
+
+tbl_outlier <- df_yearly %>%
+  select(Year, Total_Cases, Outlier_Cases, Peak_Cases, Outlier_Peak, Max_Accel, Outlier_Accel) %>%
+  gt() %>%
+  tab_header(title = md("**Bảng 2: Nhận diện Năm Dịch dựa trên Outlier Thống kê**")) %>%
+  tab_style(style = cell_fill(color = "#ffcccc"), locations = cells_body(rows = Outlier_Cases == "Yes" | Outlier_Peak == "Yes" | Outlier_Accel == "Yes"))
+
+plot_box_cases <- ggplot(df_yearly, aes(x = "", y = Total_Cases)) +
+  geom_boxplot(fill = "#A8DADC", color = "#1D3557", width = 0.5, outlier.shape = NA) +
+  geom_jitter(aes(color = Outlier_Cases), width = 0.2, size = 3) +
+  geom_text_repel(data = filter(df_yearly, Outlier_Cases == "Yes"), aes(label = Year), size = 5, fontface = "bold") +
+  scale_color_manual(values = c("Yes" = "#E63946", "No" = "gray40")) +
+  labs(title = "Tổng số ca mắc", x = "", y = "Số ca") +
+  theme_hcdc_report() + theme(legend.position = "none")
+
+plot_box_peak <- ggplot(df_yearly, aes(x = "", y = Peak_Cases)) +
+  geom_boxplot(fill = "#457B9D", color = "#1D3557", width = 0.5, outlier.shape = NA) +
+  geom_jitter(aes(color = Outlier_Peak), width = 0.2, size = 3) +
+  geom_text_repel(data = filter(df_yearly, Outlier_Peak == "Yes"), aes(label = Year), size = 5, fontface = "bold") +
+  scale_color_manual(values = c("Yes" = "#E63946", "No" = "gray40")) +
+  labs(title = "Đỉnh dịch cao nhất", x = "", y = "Ca / Tuần") +
+  theme_hcdc_report() + theme(legend.position = "none")
+
+plot_box_accel <- ggplot(df_yearly, aes(x = "", y = Max_Accel)) +
+  geom_boxplot(fill = "#F4A261", color = "#1D3557", width = 0.5, outlier.shape = NA) +
+  geom_jitter(aes(color = Outlier_Accel), width = 0.2, size = 3) +
+  geom_text_repel(data = filter(df_yearly, Outlier_Accel == "Yes"), aes(label = Year), size = 5, fontface = "bold") +
+  scale_color_manual(values = c("Yes" = "#E63946", "No" = "gray40")) +
+  labs(title = "Gia tốc bùng phát", x = "", y = "Delta (Ca / Tuần)") +
+  theme_hcdc_report() + theme(legend.position = "none")
+
+tbl_outlier
+
+plot_box_cases | plot_box_peak | plot_box_accel
+```
+
+## Cách 3: K-means Clustering
+
+```{r}
+# Loại pct_inp và pct_sev vì thấy cỡ mẫu bị pha loãng (có thể do báo cáo thiếu)
+df_model_new <- df_yearly %>% select(Total_Cases, Peak_Cases, Max_Accel)
+df_scaled_new <- scale(df_model_new)
+
+set.seed(42)
+km_res_new <- kmeans(df_scaled_new, centers = 2, nstart = 25)
+df_yearly$Cluster <- km_res_new$cluster
+
+# Xác định cụm dịch
+mean_cluster_new <- df_yearly %>% group_by(Cluster) %>% summarise(mean_c = mean(Total_Cases))
+epidemic_id_new <- mean_cluster_new$Cluster[which.max(mean_cluster_new$mean_c)]
+df_yearly <- df_yearly %>%
+  mutate(Status = ifelse(Cluster == epidemic_id_new, "Năm dịch", "Năm lưu hành"))
+
+tbl_cluster <- df_yearly %>%
+  select(Year, Status, Total_Cases, Peak_Cases, Max_Accel) %>%
+  arrange(desc(Total_Cases)) %>%
+  gt() %>%
+  tab_header(title = md("**Bảng 3: Phân loại năm dịch bằng K-means (Không gồm biến lâm sàng)**")) %>%
+  tab_style(style = cell_text(weight = "bold", color = "#E63946"), locations = cells_body(rows = Status == "Năm dịch"))
+
+hull_data <- df_yearly %>%
+  group_by(Status) %>%
+  slice(chull(Total_Cases, Peak_Cases))
+
+plot_cluster <- ggplot(df_yearly, aes(x = Total_Cases, y = Peak_Cases)) +
+
+  geom_polygon(data = hull_data, aes(fill = Status, color = Status), alpha = 0.15, show.legend = FALSE) +
+
+  geom_point(aes(color = Status, size = Max_Accel), alpha = 0.9) +
+  geom_text_repel(aes(label = Year, color = Status), size = 5.5, fontface = "bold", show.legend = FALSE) +
+  scale_color_manual(values = c("Năm dịch" = "#E63946", "Năm lưu hành" = "#2A9D8F")) +
+  scale_fill_manual(values = c("Năm dịch" = "#E63946", "Năm lưu hành" = "#2A9D8F")) +
+  scale_size_continuous(range = c(5, 15), name = "Gia tốc bùng phát (Max Accel)") +
+  labs(
+    title = "Phân loại Năm Dịch bằng Học máy không giám sát",
+    subtitle = "Mô hình 3 chiều: Tổng ca (X), Đỉnh dịch (Y) và Gia tốc lây lan (Kích thước)",
+    x = "Tổng số ca cả năm",
+    y = "Đỉnh dịch cao nhất (Ca / Tuần)",
+    color = "Phân loại:"
+  ) +
+  theme_hcdc_report() +
+  theme(legend.position = "right")
+
+plot_cluster
+```
+
+## Cách 4:  Isolate Forest
+
+```{r}
+library(isotree)
+df_iso <- df_yearly %>% select(Total_Cases, Peak_Cases, Max_Accel)
+
+# Chạy mô hình Isolation Forest (Tạo 100 cây quyết định)
+set.seed(123)
+iso_model <- isolation.forest(df_iso, ntrees = 100)
+
+df_yearly$Anomaly_Score <- predict(iso_model, df_iso)
+
+df_yearly <- df_yearly %>%
+  mutate(
+    Iso_Status = ifelse(Anomaly_Score >= 0.5, "Năm dịch", "Năm lưu hành"),
+    Label_Iso = ifelse(Iso_Status == "Năm dịch", Year, "")
+  )
+
+tbl_iso <- df_yearly %>%
+  select(Year, Total_Cases, Peak_Cases, Max_Accel, Anomaly_Score, Iso_Status) %>%
+  arrange(desc(Anomaly_Score)) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Xếp hạng năm dịch theo điểm dị biệt (Isolation Forest)**"),
+    subtitle = "Điểm càng gần 1, hình thái lây lan càng bất thường"
+  ) %>%
+  fmt_number(columns = c(Anomaly_Score), decimals = 3) %>%
+  tab_style(
+    style = list(cell_text(weight = "bold", color = "#E63946")),
+    locations = cells_body(rows = Iso_Status == "Năm dịch")
+  )
+
+df_yearly_bar <- df_yearly %>% arrange(Anomaly_Score) %>% mutate(Year_Fct = factor(Year, levels = Year))
+
+plot_isolation <- ggplot(df_yearly_bar, aes(x = Anomaly_Score, y = Year_Fct, fill = Iso_Status)) +
+  geom_bar(stat = "identity", width = 0.7, color = "black") +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "red", size = 1) +
+  geom_text(aes(label = round(Anomaly_Score, 3)), hjust = -0.2, size = 5, color = "black") +
+  scale_fill_manual(values = c("Năm dịch" = "#E63946", "Năm lưu hành" = "#A8DADC")) +
+  scale_x_continuous(limits = c(0, 0.8), breaks = seq(0, 1, 0.1)) +
+  labs(
+    x = "Điểm dị biệt (Anomaly Score)",
+    y = "Năm",
+    fill = "Phân loại:"
+  ) +
+  theme_hcdc_report() +
+  theme(legend.position = "top")
+
+plot_isolation
+```
+
