@@ -1,0 +1,84 @@
+---
+title: "BÁO CÁO KẾT QUẢ ĐÁNH GIÁ MÔ HÌNH DỰ BÁO XGBOOST TRÊN ĐỊA GIỚI HÀNH CHÍNH MỚI"
+author: "Nhóm Mô Hình Hóa"
+date: today
+format: 
+  docx:
+    toc: true
+    number-sections: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+# Nạp toàn bộ logic tiền xử lý và biểu đồ từ file ngầm
+source("sources_forecast_eval.R")
+```
+
+# Đặt vấn đề
+
+Báo cáo này nhằm thẩm định lại độ chính xác của mô hình XGBoost sau khi điều chỉnh cấu trúc không gian từ ranh giới hành chính cấp Quận/Huyện xuống chi tiết cấp Phường/Xã.
+
+Việc back-testing trên chuỗi dữ liệu lịch sử giúp đảm bảo thuật toán vẫn hoạt động ổn định, kiểm soát tốt sai số trước khi đưa kết quả dự báo (tầm nhìn từ 1 đến 12 tuần) vào hệ thống báo cáo giám sát cảnh báo sớm thường quy.
+
+# Đánh giá hiệu suất mô hình toàn Thành phố
+
+## Sai số theo độ dài tầm nhìn dự báo (Forecast Horizon)
+
+Hệ thống được thiết lập chạy dự báo cuốn chiếu (Rolling Forecast). Mỗi tuần, mô hình sẽ nạp dữ liệu mới nhất và dự báo cho 12 tuần tiếp theo.
+
+Bảng dưới đây đo lường sự biến thiên của sai số khi cố gắng dự báo càng xa vào tương lai.
+
+```{r}
+#| label: tbl-metrics-fh
+tbl_metrics_fh
+```
+
+## Sai số dự báo ngắn hạn theo từng năm
+
+Ở tầm nhìn ngắn hạn (dự báo trước 1 tuần, tức fh = 1), mức độ sai số được đánh giá theo từng năm để kiểm tra tính ổn định của mô hình qua các mùa dịch khác nhau.
+
+```{r}
+#| label: tbl-metrics-year
+tbl_metrics_year
+```
+
+## Fit mô hình toàn Thành phố qua các năm
+
+Biểu đồ so sánh đường thực tế và kịch bản dự báo trung vị (ngắn hạn 1 tuần) trên toàn thành phố từ 2016 đến 2019.
+
+```{r}
+#| label: fig-hcm1-facet
+#| fig-cap: "So sánh thực tế và dự báo toàn Thành phố (Tách theo năm)"
+#| fig-width: 9
+#| fig-height: 7
+p_hcm1_facet_year
+```
+
+# Đánh giá độ nhạy trên Phường/Xã
+
+Ở độ phân giải không gian cao (cấp Phường), số ca bệnh thường rải rác và bị nhiễu lớn hơn. Thử nghiệm trên hai phường mục tiêu để đánh giá năng lực bắt đỉnh dịch của mô hình tại cộng đồng.
+
+## Phường Chánh Hưng
+
+```{r}
+#| label: fig-hcm2-chanhhung
+#| fig-cap: "Hiệu suất mô hình tại Phường Chánh Hưng"
+#| fig-width: 9
+#| fig-height: 7
+p_hcm2_chanhhung
+```
+
+## Phường Chợ Quán
+
+```{r}
+#| label: fig-hcm2-choquan
+#| fig-cap: "Hiệu suất mô hình tại Phường Chợ Quán"
+#| fig-width: 9
+#| fig-height: 7
+p_hcm2_choquan
+```
+

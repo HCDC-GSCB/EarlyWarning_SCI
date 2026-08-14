@@ -1,0 +1,27 @@
+{
+    "id": "18888B80",
+    "path": "D:/GitHub/EarlyWarning_SCI/Forecasting/sources_forecast_eval.R",
+    "project_path": "Forecasting/sources_forecast_eval.R",
+    "type": "r_source",
+    "hash": "2384341106",
+    "contents": "",
+    "dirty": false,
+    "created": 1786696961592.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "11,23",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1786696974,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1786696974527,
+    "read_only": false,
+    "read_only_alternatives": []
+}

@@ -1,0 +1,6 @@
+"0","#| label: setup"
+"0","# Nạp toàn bộ logic tiền xử lý và biểu đồ từ file ngầm"
+"0","source(""sources_forecast_eval.R"")"
+"2","Error in seq.int(from = unclass(cfrom), to = unclass(cto), by = by) : 
+  'from' must be a finite number
+"
