@@ -1,6 +1,6 @@
 ---
 title: "BÁO CÁO KẾT QUẢ ĐÁNH GIÁ MÔ HÌNH DỰ BÁO XGBOOST TRÊN ĐỊA GIỚI HÀNH CHÍNH MỚI"
-author: "Nhóm Mô Hình Hóa"
+author: "Nhóm Mô hình hóa"
 date: today
 format: 
   docx:
@@ -10,11 +10,13 @@ execute:
   echo: false
   warning: false
   message: false
+knitr:
+  opts_chunk: 
+    fig.path: "Figures/"
 ---
 
 ```{r}
 #| label: setup
-# Nạp toàn bộ logic tiền xử lý và biểu đồ từ file ngầm
 source("sources_forecast_eval.R")
 ```
 
@@ -37,15 +39,6 @@ Bảng dưới đây đo lường sự biến thiên của sai số khi cố g�
 tbl_metrics_fh
 ```
 
-## Sai số dự báo ngắn hạn theo từng năm
-
-Ở tầm nhìn ngắn hạn (dự báo trước 1 tuần, tức fh = 1), mức độ sai số được đánh giá theo từng năm để kiểm tra tính ổn định của mô hình qua các mùa dịch khác nhau.
-
-```{r}
-#| label: tbl-metrics-year
-tbl_metrics_year
-```
-
 ## Fit mô hình toàn Thành phố qua các năm
 
 Biểu đồ so sánh đường thực tế và kịch bản dự báo trung vị (ngắn hạn 1 tuần) trên toàn thành phố từ 2016 đến 2019.
@@ -62,23 +55,131 @@ p_hcm1_facet_year
 
 Ở độ phân giải không gian cao (cấp Phường), số ca bệnh thường rải rác và bị nhiễu lớn hơn. Thử nghiệm trên hai phường mục tiêu để đánh giá năng lực bắt đỉnh dịch của mô hình tại cộng đồng.
 
-## Phường Chánh Hưng
+## Fit mô hình phường, xã qua các năm
+
+### Phường Củ Chi
 
 ```{r}
-#| label: fig-hcm2-chanhhung
-#| fig-cap: "Hiệu suất mô hình tại Phường Chánh Hưng"
 #| fig-width: 9
 #| fig-height: 7
-p_hcm2_chanhhung
+#| label: cuchi 
+p_hcm3_wards$`Củ Chi`
 ```
 
-## Phường Chợ Quán
+### Phường Hiệp Bình
 
 ```{r}
-#| label: fig-hcm2-choquan
-#| fig-cap: "Hiệu suất mô hình tại Phường Chợ Quán"
 #| fig-width: 9
 #| fig-height: 7
-p_hcm2_choquan
+#| label: hiepbinh
+p_hcm3_wards$`Hiệp Bình`
+```
+
+### Phường Hưng Long
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: hunglong
+p_hcm3_wards$`Hưng Long`
+```
+
+### Phường Bình Chánh
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: binhchanh
+p_hcm3_wards$`Bình Chánh`
+```
+
+### Phường Tân Vĩnh Lộc
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: tanvinhloc
+p_hcm3_wards$`Tân Vĩnh Lộc`
+```
+
+### Phường An Hội Tây
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: anhoitay
+p_hcm3_wards$`An Hội Tây`
+```
+
+### Phường Hiệp Phước
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: hiepphuoc
+p_hcm3_wards$`Hiệp Phước`
+```
+
+### Phường Đông Thạnh
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: dongthanh
+p_hcm3_wards$`Đông Thạnh`
+```
+
+### Phường Tam Bình
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: tambinh
+p_hcm3_wards$`Tam Bình`
+```
+
+### Phường Bình Lợi
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: binhloi
+p_hcm3_wards$`Bình Lợi`
+```
+
+### Phường An Lạc
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: anlac
+p_hcm3_wards$`An Lạc`
+```
+
+### Phường Hạnh Thông
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: hanhthong
+p_hcm3_wards$`Hạnh Thông`
+```
+
+### Phường Tân Hưng
+
+```{r}
+#| fig-width: 9
+#| fig-height: 7
+#| label: tanhung
+p_hcm3_wards$`Tân Hưng`
+```
+
+## Sai số theo độ dài tầm nhìn dự báo (Forecast Horizon)
+
+```{r}
+#| label: fig-error-horizon
+#| fig-width: 16
+#| fig-height: 14
+p_hcm3_error_horizon
 ```
 
