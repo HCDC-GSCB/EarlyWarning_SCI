@@ -1,0 +1,512 @@
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+tcm_inp <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "noi")
+tcm_sev <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "nang")
+theme_hcdc_report <- function() {
+theme_bw(base_size = 14) +
+theme(
+text = element_text(color = "black"),
+axis.text = element_text(color = "black", size = 12),
+axis.title = element_text(color = "black", size = 14, face = "bold"),
+plot.title = element_text(color = "black", size = 16, face = "bold", hjust = 0.5),
+plot.subtitle = element_text(color = "black", size = 13, hjust = 0.5, margin = margin(b = 10)),
+legend.text = element_text(color = "black", size = 12),
+legend.title = element_text(color = "black", size = 12, face = "bold"),
+panel.grid.minor = element_blank(),
+panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+plot.background = element_rect(fill = "white", color = NA),
+panel.background = element_rect(fill = "white", color = NA),
+strip.text = element_text(color = "white", size = 14, face = "bold"),
+strip.background = element_rect(fill = "#1D3557", color = NA)
+)
+}
+tao_bang_gt <- function(df, title_text) {
+df %>% gt() %>% tab_header(title = md(title_text)) %>% fmt_number(columns = where(is.numeric), decimals = 2)
+}
+get_weekly_data <- function(df_cases, disease_name) {
+df_cases %>%
+pivot_longer(cols = -Week, names_to = "Year", values_to = "Cases") %>%
+mutate(Year = as.numeric(Year), Disease = disease_name) %>%
+filter(Year != 2026) %>%
+arrange(Year, Week)
+}
+df_weekly_sxh <- get_weekly_data(sxh_cases, "Dengue")
+df_weekly_tcm <- get_weekly_data(tcm_cases, "HFMD")
+df_weekly <- bind_rows(df_weekly_sxh, df_weekly_tcm)
+#| label: m2-negative-binomial
+#| warning: false
+library(MASS)
+run_method_2 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = df_dis), error = function(e) NULL)
+if(is.null(nb_model)) next
+df_fitted <- df_dis %>% mutate(Expected = predict(nb_model, type = "response"))
+theta_val <- nb_model$theta
+eval_res <- df_fitted %>%
+group_by(Year) %>%
+summarise(
+Chi2_Stat = sum((Cases - Expected)^2 / (Expected + (Expected^2)/theta_val), na.rm = TRUE),
+P_Value = 1 - pchisq(Chi2_Stat, df = 52),
+.groups = "drop"
+) %>%
+mutate(Disease = dis, Status = ifelse(P_Value < 0.05, "Abnormal", "Normal"))
+res_data[[dis]] <- eval_res
+plot_data[[dis]] <- df_fitted %>% left_join(eval_res %>% select(Year, Status), by = "Year")
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2(df_weekly)
+View(df_weekly)
+sum(is.na(df_weekly$Cases))
+which(is.na(df_weekly$Cases))
+gc()
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(digest)
+library(googlesheets4)
+library(googledrive)
+library(gt)
+library(ggrepel)
+library(patchwork)
+library(isotree)
+load_data <- function(url, sheet) {
+gs4_deauth()
+df <- read_sheet(url, sheet = sheet)
+return(df)
+}
+sxh_cases <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "ca")
+sxh_inp <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "noi")
+sxh_sev <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "nang")
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+tcm_inp <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "noi")
+tcm_sev <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "nang")
+theme_hcdc_report <- function() {
+theme_bw(base_size = 14) +
+theme(
+text = element_text(color = "black"),
+axis.text = element_text(color = "black", size = 12),
+axis.title = element_text(color = "black", size = 14, face = "bold"),
+plot.title = element_text(color = "black", size = 16, face = "bold", hjust = 0.5),
+plot.subtitle = element_text(color = "black", size = 13, hjust = 0.5, margin = margin(b = 10)),
+legend.text = element_text(color = "black", size = 12),
+legend.title = element_text(color = "black", size = 12, face = "bold"),
+panel.grid.minor = element_blank(),
+panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+plot.background = element_rect(fill = "white", color = NA),
+panel.background = element_rect(fill = "white", color = NA),
+strip.text = element_text(color = "white", size = 14, face = "bold"),
+strip.background = element_rect(fill = "#1D3557", color = NA)
+)
+}
+tao_bang_gt <- function(df, title_text) {
+df %>% gt() %>% tab_header(title = md(title_text)) %>% fmt_number(columns = where(is.numeric), decimals = 2)
+}
+get_weekly_data <- function(df_cases, disease_name) {
+df_cases %>%
+pivot_longer(cols = -Week, names_to = "Year", values_to = "Cases") %>%
+mutate(Year = as.numeric(Year), Disease = disease_name) %>%
+filter(Year != 2026) %>%
+arrange(Year, Week)
+}
+df_weekly_sxh <- get_weekly_data(sxh_cases, "Dengue")
+df_weekly_tcm <- get_weekly_data(tcm_cases, "HFMD")
+df_weekly <- bind_rows(df_weekly_sxh, df_weekly_tcm)
+#| label: m2-negative-binomial
+#| warning: false
+library(MASS)
+run_method_2 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = df_dis), error = function(e) NULL)
+if(is.null(nb_model)) next
+df_fitted <- df_dis %>% mutate(Expected = predict(nb_model, type = "response"))
+theta_val <- nb_model$theta
+eval_res <- df_fitted %>%
+group_by(Year) %>%
+summarise(
+Chi2_Stat = sum((Cases - Expected)^2 / (Expected + (Expected^2)/theta_val), na.rm = TRUE),
+P_Value = 1 - pchisq(Chi2_Stat, df = 52),
+.groups = "drop"
+) %>%
+mutate(Disease = dis, Status = ifelse(P_Value < 0.05, "Abnormal", "Normal"))
+res_data[[dis]] <- eval_res
+plot_data[[dis]] <- df_fitted %>% left_join(eval_res %>% select(Year, Status), by = "Year")
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2(df_weekly)
+run_method_2 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = df_dis), error = function(e) NULL)
+if(is.null(nb_model)) next
+df_fitted <- df_dis %>% mutate(Expected = predict(nb_model, newdata = df_dis, type = "response"))
+theta_val <- nb_model$theta
+eval_res <- df_fitted %>%
+group_by(Year) %>%
+summarise(
+Chi2_Stat = sum((Cases - Expected)^2 / (Expected + (Expected^2)/theta_val), na.rm = TRUE),
+P_Value = 1 - pchisq(Chi2_Stat, df = 52),
+.groups = "drop"
+) %>%
+mutate(Disease = dis, Status = ifelse(P_Value < 0.05, "Abnormal", "Normal"))
+res_data[[dis]] <- eval_res
+# FIX LỖI XUNG ĐỘT Ở ĐÂY: Thêm dplyr:: trước select
+plot_data[[dis]] <- df_fitted %>% left_join(eval_res %>% dplyr::select(Year, Status), by = "Year")
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2(df_weekly)
+# XUẤT BẢNG GT
+res_m2$table %>%
+gt(groupname_col = "Disease") %>%
+tab_header(title = md("**Method 2: Negative Binomial Goodness-of-Fit**")) %>%
+fmt_number(columns = c(Chi2_Stat, P_Value), decimals = 4) %>%
+cols_label(Chi2_Stat = "Chi-Square Stat", P_Value = "P-Value", Status = "Classification") %>%
+tab_style(
+style = cell_text(color = "#E63946", weight = "bold"),
+locations = cells_body(rows = Status == "Abnormal")
+)
+ggplot(res_m2$plot_df, aes(x = Week)) +
+geom_line(aes(y = Expected), color = "gray50", linetype = "dashed", size = 0.8) +
+geom_line(aes(y = Cases, color = Status), size = 1) +
+scale_color_manual(values = c("Abnormal" = "#E63946", "Normal" = "#2A9D8F")) +
+facet_grid(Disease ~ Year, scales = "free_y") +
+labs(title = "Observed vs NB Expected (Method 2)", subtitle = "Dashed line: 10-year Negative Binomial Expectation", x = "Epidemiological Week", y = "Cases", color = "Status") +
+theme_hcdc_report() +
+theme(legend.position = "bottom", axis.text.x = element_blank())
+res_m2$table %>%
+gt(groupname_col = "Disease") %>%
+tab_header(title = md("**Method 2: Negative Binomial Goodness-of-Fit**")) %>%
+fmt_number(columns = c(Chi2_Stat, P_Value), decimals = 4) %>%
+cols_label(Chi2_Stat = "Chi-Square Stat", P_Value = "P-Value", Status = "Classification") %>%
+tab_style(
+style = cell_text(color = "#E63946", weight = "bold"),
+locations = cells_body(rows = Status == "Abnormal")
+)
+library(MASS)
+run_method_2 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+# 1. Fit mô hình khuôn 10 năm
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = df_dis), error = function(e) NULL)
+if(is.null(nb_model)) next
+# 2. Tính số ca kỳ vọng (Baseline)
+df_fitted <- df_dis %>% mutate(Expected = predict(nb_model, newdata = df_dis, type = "response"))
+theta_val <- nb_model$theta
+# 3. Tính độ lệch Chi-square và P-Value
+eval_res <- df_fitted %>%
+group_by(Year) %>%
+summarise(
+Chi2_Stat = sum((Cases - Expected)^2 / (Expected + (Expected^2)/theta_val), na.rm = TRUE),
+P_Value = 1 - pchisq(Chi2_Stat, df = 52),
+.groups = "drop"
+) %>%
+mutate(
+Disease = dis,
+Status = ifelse(P_Value < 0.05, "Abnormal", "Normal"),
+# Tạo nhãn dán sao (Significance stars) giống ggpubr
+Sig_Label = case_when(
+P_Value < 0.001 ~ "***",
+P_Value < 0.01 ~ "**",
+P_Value < 0.05 ~ "*",
+TRUE ~ "ns"
+),
+# Ghép chữ p-value và sao để in lên biểu đồ
+P_Text = paste0("p ", ifelse(P_Value < 0.001, "< 0.001", paste0("= ", format(round(P_Value, 3), nsmall = 3))), " ", Sig_Label)
+)
+res_data[[dis]] <- eval_res
+plot_data[[dis]] <- df_fitted %>% left_join(eval_res %>% dplyr::select(Year, Status), by = "Year")
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2(df_weekly)
+gc()
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(digest)
+library(googlesheets4)
+library(googledrive)
+library(gt)
+library(ggrepel)
+library(patchwork)
+library(isotree)
+load_data <- function(url, sheet) {
+gs4_deauth()
+df <- read_sheet(url, sheet = sheet)
+return(df)
+}
+sxh_cases <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "ca")
+sxh_inp <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "noi")
+sxh_sev <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "nang")
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+tcm_inp <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "noi")
+tcm_sev <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "nang")
+theme_hcdc_report <- function() {
+theme_bw(base_size = 14) +
+theme(
+text = element_text(color = "black"),
+axis.text = element_text(color = "black", size = 12),
+axis.title = element_text(color = "black", size = 14, face = "bold"),
+plot.title = element_text(color = "black", size = 16, face = "bold", hjust = 0.5),
+plot.subtitle = element_text(color = "black", size = 13, hjust = 0.5, margin = margin(b = 10)),
+legend.text = element_text(color = "black", size = 12),
+legend.title = element_text(color = "black", size = 12, face = "bold"),
+panel.grid.minor = element_blank(),
+panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+plot.background = element_rect(fill = "white", color = NA),
+panel.background = element_rect(fill = "white", color = NA),
+strip.text = element_text(color = "white", size = 14, face = "bold"),
+strip.background = element_rect(fill = "#1D3557", color = NA)
+)
+}
+tao_bang_gt <- function(df, title_text) {
+df %>% gt() %>% tab_header(title = md(title_text)) %>% fmt_number(columns = where(is.numeric), decimals = 2)
+}
+get_weekly_data <- function(df_cases, disease_name) {
+df_cases %>%
+pivot_longer(cols = -Week, names_to = "Year", values_to = "Cases") %>%
+mutate(Year = as.numeric(Year), Disease = disease_name) %>%
+filter(Year != 2026) %>%
+arrange(Year, Week)
+}
+df_weekly_sxh <- get_weekly_data(sxh_cases, "Dengue")
+df_weekly_tcm <- get_weekly_data(tcm_cases, "HFMD")
+df_weekly <- bind_rows(df_weekly_sxh, df_weekly_tcm)
+library(MASS)
+run_method_2 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+# 1. Fit mô hình khuôn 10 năm
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = df_dis), error = function(e) NULL)
+if(is.null(nb_model)) next
+# 2. Tính số ca kỳ vọng (Baseline)
+df_fitted <- df_dis %>% mutate(Expected = predict(nb_model, newdata = df_dis, type = "response"))
+theta_val <- nb_model$theta
+# 3. Tính độ lệch Chi-square và P-Value
+eval_res <- df_fitted %>%
+group_by(Year) %>%
+summarise(
+Chi2_Stat = sum((Cases - Expected)^2 / (Expected + (Expected^2)/theta_val), na.rm = TRUE),
+P_Value = 1 - pchisq(Chi2_Stat, df = 52),
+.groups = "drop"
+) %>%
+mutate(
+Disease = dis,
+Status = ifelse(P_Value < 0.05, "Abnormal", "Normal"),
+# Tạo nhãn dán sao (Significance stars) giống ggpubr
+Sig_Label = case_when(
+P_Value < 0.001 ~ "***",
+P_Value < 0.01 ~ "**",
+P_Value < 0.05 ~ "*",
+TRUE ~ "ns"
+),
+# Ghép chữ p-value và sao để in lên biểu đồ
+P_Text = paste0("p ", ifelse(P_Value < 0.001, "< 0.001", paste0("= ", format(round(P_Value, 3), nsmall = 3))), " ", Sig_Label)
+)
+res_data[[dis]] <- eval_res
+plot_data[[dis]] <- df_fitted %>% left_join(eval_res %>% dplyr::select(Year, Status), by = "Year")
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2(df_weekly)
+# XUẤT BẢNG GT
+res_m2$table %>%
+gt(groupname_col = "Disease") %>%
+tab_header(title = md("**Method 2: Negative Binomial Goodness-of-Fit**")) %>%
+fmt_number(columns = c(Chi2_Stat, P_Value), decimals = 4) %>%
+# Ẩn cột P_Text đi cho bảng đỡ rối, chỉ show P_Value gốc và Status
+cols_hide(columns = c(Sig_Label, P_Text)) %>%
+cols_label(Chi2_Stat = "Chi-Square Stat", P_Value = "P-Value", Status = "Classification") %>%
+tab_style(
+style = cell_text(color = "#E63946", weight = "bold"),
+locations = cells_body(rows = Status == "Abnormal")
+)
+# VẼ BIỂU ĐỒ TRỰC QUAN (DẠNG PHÂN PHỐI + GẮN SAO)
+ggplot(res_m2$plot_df, aes(x = Week)) +
+# Vẽ phân phối Kỳ vọng 10 năm (lớp nền màu xám mờ)
+geom_area(aes(y = Expected, fill = "10-Year Baseline"), alpha = 0.4) +
+# Vẽ phân phối Thực tế của năm (đè lên trên)
+geom_area(aes(y = Cases, fill = Status), alpha = 0.7) +
+# Gắn P-value và sao (***) lên giữa đỉnh của từng đồ thị
+geom_text(
+data = res_m2$table,
+aes(x = 26, y = Inf, label = P_Text, color = Status),
+vjust = 1.5, size = 4, fontface = "bold", show.legend = FALSE
+) +
+# Setup màu sắc cho phần Fill (diện tích) và Color (chữ sao)
+scale_fill_manual(
+name = "Distribution:",
+values = c("10-Year Baseline" = "gray50", "Abnormal" = "#E63946", "Normal" = "#2A9D8F")
+) +
+scale_color_manual(values = c("Abnormal" = "#E63946", "Normal" = "#2A9D8F")) +
+facet_grid(Disease ~ Year, scales = "free_y") +
+labs(
+title = "Annual Case Distribution vs. 10-Year Negative Binomial Baseline",
+subtitle = "Statistical significance (Goodness-of-Fit): ns (p >= 0.05), * (p < 0.05), ** (p < 0.01), *** (p < 0.001)",
+x = "Epidemiological Week",
+y = "Cases"
+) +
+theme_hcdc_report() +
+theme(legend.position = "bottom", axis.text.x = element_blank())
+#| label: m3-ks-test
+#| warning: false
+run_method_3 <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+baseline_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+v_baseline <- rep(df_dis$Week, df_dis$Cases)
+years <- unique(df_dis$Year)
+for (y in years) {
+df_y <- df_dis %>% filter(Year == y)
+v_test <- rep(df_y$Week, df_y$Cases)
+ks_res <- suppressWarnings(ks.test(v_test, v_baseline))
+res_data[[paste(dis, y)]] <- tibble(
+Disease = dis, Year = y,
+KS_Stat = ks_res$statistic, P_Value = ks_res$p.value,
+Status = ifelse(ks_res$p.value < 0.05, "Abnormal", "Normal")
+)
+}
+# Tính đường CDF từng năm
+eval_res <- bind_rows(res_data) %>% filter(Disease == dis)
+cdf_df <- df_dis %>%
+group_by(Year) %>% arrange(Week) %>%
+mutate(Cum_Pct = cumsum(Cases) / sum(Cases)) %>% ungroup() %>%
+left_join(eval_res %>% select(Year, Status), by = "Year")
+# Tính đường CDF chuẩn (Baseline)
+cdf_base <- df_dis %>%
+group_by(Week) %>% summarise(Cases = sum(Cases), .groups = "drop") %>%
+arrange(Week) %>% mutate(Cum_Pct_Base = cumsum(Cases) / sum(Cases), Disease = dis)
+plot_data[[dis]] <- cdf_df
+baseline_data[[dis]] <- cdf_base
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data), base_df = bind_rows(baseline_data))
+}
+res_m3 <- run_method_3(df_weekly)
+# XUẤT BẢNG GT
+res_m3$table %>%
+gt(groupname_col = "Disease") %>%
+tab_header(title = md("**Method 3: K-S Shape Test (CDF)**")) %>%
+fmt_number(columns = c(KS_Stat, P_Value), decimals = 4) %>%
+cols_label(KS_Stat = "KS Stat (D)", P_Value = "P-Value", Status = "Classification") %>%
+tab_style(
+style = cell_text(color = "#E63946", weight = "bold"),
+locations = cells_body(rows = Status == "Abnormal")
+)
+# VẼ BIỂU ĐỒ TRỰC QUAN
+ggplot(res_m3$plot_df, aes(x = Week)) +
+geom_line(data = res_m3$base_df, aes(y = Cum_Pct_Base), color = "black", linetype = "dashed", size = 0.8) +
+geom_line(aes(y = Cum_Pct, color = Status), size = 1) +
+scale_color_manual(values = c("Abnormal" = "#E63946", "Normal" = "#457B9D")) +
+facet_grid(Disease ~ Year) +
+labs(title = "Cumulative Distribution Function Analysis (Method 3)", subtitle = "Dashed black line: 10-year Baseline CDF", x = "Epidemiological Week", y = "Cumulative Proportion", color = "Status") +
+theme_hcdc_report() +
+theme(legend.position = "bottom", axis.text.x = element_blank())
+library(MASS)
+run_method_2_loo <- function(df) {
+diseases <- unique(df$Disease)
+res_data <- list()
+plot_data <- list()
+for (dis in diseases) {
+df_dis <- df %>% filter(Disease == dis)
+years <- unique(df_dis$Year)
+for (y in years) {
+# BƯỚC NGOẶT: Chỉ fit mô hình trên 9 năm còn lại để tránh "Nuốt phương sai"
+train_data <- df_dis %>% filter(Year != y)
+test_data <- df_dis %>% filter(Year == y)
+nb_model <- tryCatch(glm.nb(Cases ~ as.factor(Week), data = train_data), error = function(e) NULL)
+if(is.null(nb_model)) next
+# Lấy Khuôn 9 năm dự đoán cho năm mục tiêu
+test_fitted <- test_data %>%
+mutate(Expected = predict(nb_model, newdata = test_data, type = "response"))
+theta_val <- nb_model$theta
+# Tính Chi-square và P-value
+chi2_stat <- sum((test_fitted$Cases - test_fitted$Expected)^2 / (test_fitted$Expected + (test_fitted$Expected^2)/theta_val), na.rm = TRUE)
+p_val <- 1 - pchisq(chi2_stat, df = 52)
+status <- ifelse(p_val < 0.05, "Abnormal", "Normal")
+sig_label <- case_when(
+p_val < 0.001 ~ "***",
+p_val < 0.01 ~ "**",
+p_val < 0.05 ~ "*",
+TRUE ~ "ns"
+)
+p_text <- paste0("p ", ifelse(p_val < 0.001, "< 0.001", paste0("= ", format(round(p_val, 3), nsmall = 3))), " ", sig_label)
+res_data[[paste(dis, y)]] <- tibble(
+Disease = dis, Year = y,
+Chi2_Stat = chi2_stat, P_Value = p_val,
+Status = status, Sig_Label = sig_label, P_Text = p_text
+)
+plot_data[[paste(dis, y)]] <- test_fitted %>% mutate(Status = status)
+}
+}
+list(table = bind_rows(res_data), plot_df = bind_rows(plot_data))
+}
+res_m2 <- run_method_2_loo(df_weekly)
+# XUẤT BẢNG GT
+res_m2$table %>%
+gt(groupname_col = "Disease") %>%
+tab_header(title = md("**Method 2: Negative Binomial (Leave-One-Out Baseline)**")) %>%
+fmt_number(columns = c(Chi2_Stat, P_Value), decimals = 4) %>%
+cols_hide(columns = c(Sig_Label, P_Text)) %>%
+cols_label(Chi2_Stat = "Chi-Square Stat", P_Value = "P-Value", Status = "Classification") %>%
+tab_style(
+style = cell_text(color = "#E63946", weight = "bold"),
+locations = cells_body(rows = Status == "Abnormal")
+)
+# VẼ BIỂU ĐỒ TRỰC QUAN
+ggplot(res_m2$plot_df, aes(x = Week)) +
+# Vẽ nền Kỳ vọng từ 9 năm (LOO)
+geom_area(aes(y = Expected, fill = "9-Year Baseline (LOO)"), alpha = 0.4) +
+# Vẽ phân phối Thực tế
+geom_area(aes(y = Cases, fill = Status), alpha = 0.7) +
+geom_text(
+data = res_m2$table,
+aes(x = 26, y = Inf, label = P_Text, color = Status),
+vjust = 1.5, size = 4, fontface = "bold", show.legend = FALSE
+) +
+scale_fill_manual(
+name = "Distribution:",
+values = c("9-Year Baseline (LOO)" = "gray50", "Abnormal" = "#E63946", "Normal" = "#2A9D8F")
+) +
+scale_color_manual(values = c("Abnormal" = "#E63946", "Normal" = "#2A9D8F")) +
+facet_grid(Disease ~ Year, scales = "free_y") +
+labs(
+title = "Annual Case Distribution vs. 9-Year Baseline (Method 2)",
+subtitle = "Statistical significance (Goodness-of-Fit): ns (p >= 0.05), * (p < 0.05), ** (p < 0.01), *** (p < 0.001)",
+x = "Epidemiological Week",
+y = "Cases"
+) +
+theme_hcdc_report() +
+theme(legend.position = "bottom", axis.text.x = element_blank())
+library(tidyverse)
+library(MASS)      # Negative Binomial
+library(mgcv)      # GAM
+library(forecast)  # SARIMA
+library(prophet)   # Prophet
+install.packages("prophet")
+library(tidyverse)
+library(MASS)      # Negative Binomial
+library(mgcv)      # GAM
+library(forecast)  # SARIMA
+library(prophet)   # Prophet
+install.packages("prophet")

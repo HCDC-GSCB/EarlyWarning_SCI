@@ -1,0 +1,141 @@
+---
+title: "Báo cáo kết quả mô hình dự báo"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+format: docx
+execute:
+  warning: false
+  message: false
+  echo: false
+---
+
+Dữ liệu số ca được cập nhật đến tuần mới nhất (tuần 38/2026). Sử dụng mô hình XGBoost để dự báo số ca từ tuần 39-50/2026.
+
+```{r setup}
+library(tidyverse)
+library(readxl)
+library(DT)
+library(lubridate)
+
+# Đọc dữ liệu dự báo, chuẩn hóa cột và CHỈ LỌC INTERVAL 0.95
+predict_cases <- read.csv("data/bf-predictions_2026-W39_regr.xgboost_1790395108.csv") %>%
+  rename(predicted_cases = response) %>% 
+  filter(interval == 0.95) %>%  # Chỉ giữ lại khoảng tin cậy 95%
+  mutate(
+    date = as.Date(date),
+    week = 39 + as.numeric(difftime(date, as.Date("2026-09-21"), units = "weeks"))
+  )
+
+# Đọc dữ liệu thực tế và chuẩn hóa cột
+actual_cases <- read_excel("data/actual_cases.xlsx") %>%
+  rename(actual_cases = cases) %>% 
+  mutate(
+    date = as.Date("2026-09-21") - weeks(39 - week)
+  )
+```
+
+```{r data-processing}
+#| label: data-processing
+#| code-summary: "Xử lý nối liền đường thực tế và dự báo"
+
+# Xác định điểm dữ liệu thực tế cuối cùng
+last_actual <- actual_cases %>% 
+  filter(week == max(week, na.rm = TRUE))
+
+# Tạo điểm neo cho tập dự báo
+anchor_point <- predict_cases %>%
+  distinct(interval) %>%
+  mutate(
+    date = last_actual$date,
+    week = last_actual$week,
+    predicted_cases = last_actual$actual_cases, 
+    lower = last_actual$actual_cases,           
+    upper = last_actual$actual_cases,
+    region = predict_cases$region[1] 
+  )
+
+# Gộp điểm neo vào tập dự báo 95%
+predict_connected <- bind_rows(anchor_point, predict_cases) %>%
+  arrange(date)
+```
+
+```{r visualization, fig.width=10, fig.height=6}
+#| label: visualization
+#| code-summary: "Vẽ biểu đồ chuyên nghiệp với ggplot2"
+#| fig-width: 10
+#| fig-height: 6
+
+# Lấy tuần ranh giới để vẽ đường kẻ dọc
+cutoff_week <- last_actual$week
+
+ggplot() +
+  # 1. Vẽ dải băng (ribbon) cho khoảng tin cậy 95%
+  geom_ribbon(data = predict_connected, 
+              aes(x = week, ymin = lower, ymax = upper, fill = "Khoảng tin cậy 95%"), 
+              alpha = 0.15) +
+              
+  # 2. Đường phân định Quá khứ / Tương lai theo trục tuần
+  geom_vline(xintercept = cutoff_week, 
+             linetype = "dotted", color = "#7F8C8D", linewidth = 1) +
+  annotate("text", x = cutoff_week - 0.5, y = max(predict_connected$upper)*0.95, 
+           label = "Dữ liệu thực tế", hjust = 1, color = "#2C3E50", fontface = "italic") +
+  annotate("text", x = cutoff_week + 0.5, y = max(predict_connected$upper)*0.95, 
+           label = "Dự báo", hjust = 0, color = "#E74C3C", fontface = "italic") +
+  
+  # 3. Đường số ca thực tế (Chỉ dùng Line, trục X là week)
+  geom_line(data = actual_cases, 
+            aes(x = week, y = actual_cases, color = "Thực tế"), 
+            linewidth = 1.2) +
+  
+  # 4. Đường số ca dự báo (Line đứt nét + Point đặc màu đỏ)
+  geom_line(data = predict_connected, 
+            aes(x = week, y = predicted_cases, color = "Dự báo"), 
+            linewidth = 1.2, linetype = "solid") +
+  geom_point(data = predict_cases, 
+             aes(x = week, y = predicted_cases, color = "Dự báo"), 
+             size = 1.5) + # Mặc định ggplot sẽ dùng hình tròn đặc (shape = 19) và tô màu theo scale_color_manual
+  
+  # 5. Cài đặt màu sắc và định dạng trục
+  scale_x_continuous(breaks = seq(1,52,5), expand = c(0.02, 0)) +
+  scale_y_continuous(labels = scales::comma_format(), expand = c(0.05, 0)) +
+  scale_color_manual(
+    name = "",
+    values = c("Thực tế" = "#2C3E50", "Dự báo" = "#E74C3C")
+  ) +
+  scale_fill_manual(
+    name = "", 
+    values = c("Khoảng tin cậy 95%" = "#E74C3C")
+  ) +
+  
+  # 6. Tùy chỉnh giao diện
+  theme_classic(base_size = 14, base_family = "sans") +
+  labs(
+    title = "Dự báo số ca sốt xuất huyết trong 12 tuần tiếp theo",
+    subtitle = "Toàn Thành phố",
+    x = "Tuần",
+    y = "Số ca",
+    caption = "Mô hình XGBoost sử dụng dữ liệu từ 2017 đến tuần mới nhất"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, color = "black"),
+    plot.subtitle = element_text(size = 15, color = "black", margin = margin(b = 15)),
+    plot.caption = element_text(size = 11, color = "black", margin = margin(t = 15)),
+    axis.title.x = element_text(margin = margin(t = 10), face = "bold", color = "black"),
+    axis.title.y = element_text(margin = margin(r = 10), face = "bold", color = "black"),
+    axis.text = element_text(color = "black", size = 12),
+    legend.position = "top",
+    legend.justification = "left",
+    legend.box.margin = margin(b = -10),
+    panel.grid.major.y = element_line(color = "#E5E8E8", linewidth = 0.5),
+    panel.grid.major.x = element_line(color = "#E5E8E8", linewidth = 0.5, linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+```
+
+Dựa trên tính chu kỳ của sốt xuất huyết, dữ liệu giám sát cho thấy giai đoạn dịch giảm từ tuần 11-26, và bắt đầu tăng trở lại khi vào mùa mưa duy trì đà lây nhiễm khoảng 1.500 ca tại tuần 38/2026. Mặc dù mô hình dự báo cho thấy số ca mắc sẽ đi ngang ở mức 1.500 - 2.000 ca/tuần, nhưng khoảng tin cậy 95% lại khá rộng, từ tuần 44 trở đi có xu hướng tăng trở lại. Điều này phản ánh mô hình đã nhận biết đợt bùng phát thành dịch trong các tuần cuối năm, tương tự với chu kỳ của các năm dịch trước đó.
+
+```{r}
+knitr::kable(predict_cases[,2:6])
+```
+

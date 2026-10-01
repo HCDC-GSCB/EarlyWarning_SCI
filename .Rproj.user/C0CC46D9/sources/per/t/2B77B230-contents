@@ -1,0 +1,88 @@
+---
+title: "Xác định năm có dịch - Lần 2"
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r, message=FALSE, warning=FALSE}
+source("functions.R")
+
+sxh_cases <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "ca")
+
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+```
+
+```{r}
+sxh_long <- sxh_cases %>%
+  pivot_longer(
+    cols = -Week, 
+    names_to = "Year", 
+    values_to = "Cases"
+  ) %>%
+  mutate(
+    Year = as.numeric(Year),
+    Week = as.numeric(Week)
+  ) %>%
+  # Bỏ tuần 1-15 của năm 2016
+  filter(!(Year == 2016 & Week <= 15)) %>%
+  # Bỏ tuần 16 trở đi của năm 2026
+  filter(!(Year == 2026 & Week >= 16))
+
+sxh_epi <- sxh_long %>%
+  mutate(
+    Epi_Year = ifelse(Week >= 16, 
+                      paste0(Year, "-", Year + 1), 
+                      paste0(Year - 1, "-", Year)),
+    
+    Epi_Week = ifelse(Week >= 16, Week - 15, Week + 37)
+  ) %>%
+  arrange(Epi_Year, Epi_Week)
+```
+
+```{r}
+# Định nghĩa các năm bình thường
+normal_years <- c("2016-2017", "2017-2018", "2023-2024", "2024-2025", "2025-2026")
+
+# Định nghĩa 4 năm bất thường 
+abnormal_years <- c("2018-2019", "2019-2020", "2021-2022", "2022-2023")
+
+df_normal <- sxh_epi %>% 
+  filter(Epi_Year %in% normal_years) %>%
+  arrange(Epi_Year, Epi_Week)
+
+sts_list <- list()
+
+for (ab_year in abnormal_years) {
+  
+  df_abnormal <- sxh_epi %>%
+    filter(Epi_Year == ab_year) %>%
+    arrange(Epi_Week)
+
+  # Năm bất thường sẽ nằm ở cuối cùng (năm thứ 6)
+  df_stitched <- bind_rows(df_normal, df_abnormal)
+  
+  sts_obj <- sts(
+    observed = df_stitched$Cases,
+    start = c(1, 1), # Khởi tạo giả lập bắt đầu từ Năm 1, Tuần 1
+    frequency = 52
+  )
+  
+  sts_list[[ab_year]] <- sts_obj
+}
+
+# Xem cấu trúc của list kết quả
+# sts_list$`2018-2019` 
+# sts_list$`2019-2020`
+# sts_list$`2021-2022`
+# sts_list$`2022-2023`
+```
+

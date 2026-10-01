@@ -1,0 +1,347 @@
+---
+title: "Xác định năm có dịch - Lần 2"
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+source("functions.R")
+
+sxh_cases <- load_data("https://docs.google.com/spreadsheets/d/13_o7NAlfBjckO6PspzITbWhlkWbfp4eKkqYCa7Dvvgg/edit?usp=sharing", "ca")
+
+tcm_cases <- load_data("https://docs.google.com/spreadsheets/d/1jSAuGFUkcHBL5iie999qn7ClW2dTYB3AOSOaRwOBCGY/edit?usp=sharing", "ca")
+
+df_ts_sxh <- prep_continuous_ts(sxh_cases, "Dengue")
+df_ts_tcm <- prep_continuous_ts(tcm_cases, "HFMD")
+df_ts_all <- bind_rows(df_ts_sxh, df_ts_tcm)
+```
+
+## Các mô hình time-series
+
+### Mô hình Hồi quy Nhị thức âm (Negative Binomial Regression - NB)
+
+Trong dịch tễ học, dữ liệu số ca mắc theo tuần là dữ liệu dạng đếm. Mô
+hình Poisson thường được sử dụng, nhưng bị ràng buộc bởi giả định phương
+sai phải bằng giá trị trung bình. Thực tế, các bệnh truyền nhiễm này có
+hiện tượng phân tán quá mức, tức là phương sai lớn hơn rất nhiều so với
+trung bình. Do đó, mô hình Negative Binomial (NB) được sử dụng để khắc
+phục nhược điểm này bằng cách bổ sung một tham số phân tán giúp mô hình
+linh hoạt hơn.
+
+Mô hình NB dự đoán giá trị kỳ vọng của số ca mắc $\mu_t = E[Y_t]$ tại
+thời điểm $t$ thông qua hàm liên kết logarit:
+
+$$\log(\mu_t) = \beta_0 + \beta_1 \cdot \text{Time\_Index}_t + \sum_{k=1}^{51} \gamma_k \cdot I(\text{Week}_t = k)$$
+
+Trong đó:
+
+- $Y_t$: Số ca mắc thực tế tại tuần
+
+- $t$.$\text{Time\_Index}_t$: Biến thời gian tuyến tính đại diện cho xu
+  hướng dài hạn.
+
+- $I(\text{Week}_t = k)$: Biến giả (dummy variable) đại diện cho tính
+  mùa vụ, nhận giá trị $1$ nếu tuần $t$ rơi vào tuần thứ $k$ trong năm,
+  ngược lại bằng $0$.
+
+- Phương sai của mô hình được định nghĩa là:
+  $Var(Y_t) = \mu_t + \frac{\mu_t^2}{\theta}$ (với $\theta$ là tham số
+  phân tán).
+
+### Mô hình Generalized Additive Model (GAM):
+
+Trong khi hồi quy tuyến tính truyền thống giả định mối quan hệ giữa các
+biến là một đường thẳng hoặc một hình thái cố định, GAM mô hình hóa các
+mối quan hệ phi tuyến tính (non-linear). GAM thay thế các hệ số hồi quy
+cố định bằng các hàm làm mượt nên sẽ có dạng đường cong. Trong dịch tễ
+học khi xu hướng dài hạn của bệnh không tăng hay giảm theo đường thẳng,
+mà sẽ dao động theo chu kỳ của bệnh.
+
+Mô hình GAM cho dữ liệu chuỗi thời gian đếm (sử dụng phân phối Negative
+Binomial):
+
+$$\log(\mu_t) = \beta_0 + f_1(\text{Time\_Index}_t) + f_2(\text{Week}_t)$$
+
+### Mô hình phân rã chuỗi thời gian Robust STL
+
+STL (Seasonal and Trend decomposition using Loess) là một thuật toán
+phân rã chuỗi thời gian sử dụng phương pháp hồi quy LOESS để bóc tách dữ
+liệu thành 3 phần: Xu hướng (Trend), Mùa vụ (Seasonality) và Phần dư
+(Remainder). Thuật toán này có tính năng kiểm soát nhiễu (Robustness),
+tự động phát hiện các giá trị outliers và hạ thấp weights xuống gần bằng
+0, giúp các đợt dịch lớn không thể ảnh hưởng đến Expected cases.
+
+Dữ liệu gốc $Y_t$ được phân rã cộng tính: $$Y_t = T_t + S_t + R_t$$
+
+- $T_t$: Thành phần xu hướng dài hạn (Trend).
+
+- $S_t$: Thành phần mùa vụ (Seasonality).
+
+- $R_t$: Thành phần phần dư (Remainder). Đường cơ sở kỳ vọng (Expected
+  Baseline) được trích xuất bằng cách loại bỏ phần dư:
+  $$\text{Expected}_t = Y_t - R_t = T_t + S_t$$
+
+**Các bước tính toán:**
+
+- Tính $S_t$ của từng tuần bằng trung bình cộng của các năm.
+
+- Tính $T_t$ sơ khởi: $Y_t - S_t$ để tìm ra $T_t$ năm bất thường.
+
+- Tính $T_t$ hiệu chỉnh của năm bất thường bằng hồi quy LOESS của 3 năm
+  (bao gồm năm bất thường là ở giữa và năm trước, năm sau của năm bất
+  thường đó). Tiếp theo sẽ gán trọng số cho từng năm, năm giữa có trọng
+  số cao nhất. $T_t$ hiệu chỉnh của năm bất thường được tính bằng trung
+  bình cộng có trọng số của $T_t$ sơ khởi của 3 năm.
+
+- Tính phần dư $R_t = Y_t - T_t - S_t$.
+
+- Gán trọng số w = 0 cho những năm có $|R_t| >= 6*Median(|R_t|)$, ngược
+  lại thì có w = 1.
+
+- Lặp lại từ bước tính $S_t$, bỏ qua những năm có w = 0, sẽ có $S_n$ và
+  $T_n$. Cuối cùng sẽ tính ra được $$\text{Expected} = T_{\text{new}} + S_{\text{new}}$$. 
+
+```{r}
+#| label: m2-advanced-ensemble
+#| warning: false
+#| message: false
+
+run_advanced_multimodel <- function(df) {
+  diseases <- unique(df$Disease)
+  eval_results <- list()
+  fitted_results <- list()
+  
+  for (dis in diseases) {
+    df_dis <- df %>% filter(Disease == dis)
+    start_wk <- ifelse(dis == "Dengue", 15, 1) 
+    
+    # 1. FIT MÔ HÌNH
+    nb_mod <- tryCatch(glm.nb(Cases ~ as.factor(Week) + Time_Index, data = df_dis), error=function(e) NULL)
+    fit_nb <- if(!is.null(nb_mod)) predict(nb_mod, newdata = df_dis, type = "response") else rep(NA, nrow(df_dis))
+    
+    gam_mod <- gam(Cases ~ s(Time_Index) + s(Week, bs = "cc"), family = nb(), data = df_dis)
+    fit_gam <- as.numeric(fitted(gam_mod))
+    
+    ts_cases <- ts(df_dis$Cases, frequency = 52)
+    stl_mod <- stl(ts_cases, s.window = "periodic", robust = TRUE)
+    fit_stl <- as.numeric(ts_cases - stl_mod$time.series[, "remainder"])
+    
+    df_fitted <- df_dis %>%
+      mutate(Fit_GAM = fit_gam, Fit_NB = fit_nb, Fit_STL = fit_stl) %>%
+      mutate(across(starts_with("Fit_"), ~ ifelse(.x < 0, 0, .x))) %>%
+      mutate(Epi_Year = ifelse(Week < start_wk, Year - 1, Year)) %>% 
+      pivot_longer(cols = starts_with("Fit_"), names_to = "Model", names_prefix = "Fit_", values_to = "Expected")
+    
+    df_eval <- df_fitted %>%
+      filter(Epi_Year >= min(df_dis$Year) & Epi_Year < max(df_dis$Year)) %>% 
+      group_by(Epi_Year, Model) %>%
+      summarise(
+        RMSE = sqrt(mean((Cases - Expected)^2, na.rm = TRUE)),
+        Log_RMSE = sqrt(mean((log1p(Cases) - log1p(Expected))^2, na.rm = TRUE)),
+        sMAPE = mean(2 * abs(Cases - Expected) / (abs(Cases) + abs(Expected) + 1e-8), na.rm = TRUE),
+        P_Value = suppressWarnings(wilcox.test(Cases, Expected, paired = TRUE, exact = FALSE)$p.value),
+        Sum_Act = sum(Cases, na.rm = TRUE),
+        Sum_Fit = sum(Expected, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      group_by(Model) %>%
+      mutate(
+        Base_RMSE = median(RMSE, na.rm = TRUE),
+        Base_Log = median(Log_RMSE, na.rm = TRUE),
+        Base_sMAPE = median(sMAPE, na.rm = TRUE),
+        
+        # Dán nhãn riêng cho RMSE
+        Trig_RMSE = (RMSE > 1.5 * Base_RMSE) & (P_Value < 0.05),
+        St_RMSE = case_when(Trig_RMSE & (Sum_Act > Sum_Fit) ~ "High", Trig_RMSE & (Sum_Act < Sum_Fit) ~ "Low", TRUE ~ "-"),
+        
+        # Dán nhãn riêng cho Log-RMSE
+        Trig_Log = (Log_RMSE > 1.5 * Base_Log) & (P_Value < 0.05),
+        St_Log = case_when(Trig_Log & (Sum_Act > Sum_Fit) ~ "High", Trig_Log & (Sum_Act < Sum_Fit) ~ "Low", TRUE ~ "-"),
+        
+        # Dán nhãn riêng cho sMAPE
+        Trig_sMAPE = (sMAPE > 1.5 * Base_sMAPE) & (P_Value < 0.05),
+        St_sMAPE = case_when(Trig_sMAPE & (Sum_Act > Sum_Fit) ~ "High", Trig_sMAPE & (Sum_Act < Sum_Fit) ~ "Low", TRUE ~ "-"),
+        
+        Plot_Status = case_when(
+          (St_RMSE == "High" | St_Log == "High" | St_sMAPE == "High") ~ "Abnormal (High)",
+          (St_RMSE == "Low" | St_Log == "Low" | St_sMAPE == "Low") ~ "Abnormal (Low)",
+          TRUE ~ "Normal"
+        )
+      ) %>%
+      ungroup() %>%
+      mutate(Disease = dis)
+    
+    eval_results[[dis]] <- df_eval
+    
+    fitted_results[[dis]] <- df_fitted %>% 
+      left_join(df_eval %>% dplyr::select(Epi_Year, Model, Plot_Status), by = c("Epi_Year", "Model")) %>%
+      mutate(Plot_Status = replace_na(Plot_Status, "Normal")) 
+  }
+  
+  return(list(eval = bind_rows(eval_results), plot_data = bind_rows(fitted_results)))
+}
+
+
+create_mega_table <- function(eval_df, target_disease) {
+  df_sub <- eval_df %>% 
+    filter(Disease == target_disease) %>%
+    mutate(Epi_Label = ifelse(Disease == "Dengue", paste0(Epi_Year, "-", Epi_Year + 1), as.character(Epi_Year))) %>%
+    dplyr::select(Epi_Label, Model, RMSE, St_RMSE, Log_RMSE, St_Log, sMAPE, St_sMAPE, P_Value)
+  
+  wide_df <- df_sub %>%
+    pivot_wider(
+      names_from = Model, 
+      values_from = c(RMSE, St_RMSE, Log_RMSE, St_Log, sMAPE, St_sMAPE, P_Value),
+      names_glue = "{.value}_{Model}"
+    )
+  
+  tbl <- wide_df %>%
+    gt() %>%
+    tab_header(
+      title = md(sprintf("**%s**", target_disease))
+    ) %>%
+
+    fmt_number(columns = starts_with("RMSE_"), decimals = 0) %>%
+    fmt_number(columns = starts_with("Log_RMSE_"), decimals = 3) %>%
+    fmt_number(columns = starts_with("sMAPE_"), decimals = 3) %>%
+    fmt_number(columns = starts_with("P_Value_"), decimals = 4) %>%
+    
+    tab_spanner(label = md("**GAM Model**"), columns = ends_with("_GAM")) %>%
+    tab_spanner(label = md("**NB Model**"), columns = ends_with("_NB")) %>%
+    tab_spanner(label = md("**STL (Robust)**"), columns = ends_with("_STL")) %>%
+    
+    cols_label(
+      Epi_Label = "Epi-Year",
+      RMSE_GAM = "RMSE", St_RMSE_GAM = "St", Log_RMSE_GAM = "Log", St_Log_GAM = "St", sMAPE_GAM = "sMAPE", St_sMAPE_GAM = "St", P_Value_GAM = "P-val",
+      RMSE_NB = "RMSE", St_RMSE_NB = "St", Log_RMSE_NB = "Log", St_Log_NB = "St", sMAPE_NB = "sMAPE", St_sMAPE_NB = "St", P_Value_NB = "P-val",
+      RMSE_STL = "RMSE", St_RMSE_STL = "St", Log_RMSE_STL = "Log", St_Log_STL = "St", sMAPE_STL = "sMAPE", St_sMAPE_STL = "St", P_Value_STL = "P-val"
+    ) %>%
+    cols_align(align = "center", columns = starts_with("St_"))
+  
+  status_cols <- names(wide_df)[str_detect(names(wide_df), "^St_")]
+  
+  for (col in status_cols) {
+    tbl <- tbl %>%
+      tab_style(
+        style = list(cell_fill(color = "#fee2e2"), cell_text(color = "#b91c1c", weight = "bold")),
+        locations = cells_body(columns = all_of(col), rows = .data[[col]] == "High")
+      ) %>%
+      tab_style(
+        style = list(cell_fill(color = "#fef08a"), cell_text(color = "#b45309", weight = "bold")),
+        locations = cells_body(columns = all_of(col), rows = .data[[col]] == "Low")
+      )
+  }
+  
+  return(tbl)
+}
+
+
+plot_elite_timeseries <- function(plot_df, disease_target) {
+  df_target <- plot_df %>% filter(Disease == disease_target)
+  
+  year_breaks <- df_target %>% filter(Week == 1) %>% pull(Time_Index)
+  year_labels <- df_target %>% filter(Week == 1) %>% pull(Year)
+  
+  p <- ggplot(df_target, aes(x = Time_Index)) +
+    # RED ZONE (High Outbreaks)
+    geom_rect(
+      data = df_target %>% filter(Plot_Status == "Abnormal (High)"),
+      aes(xmin = Time_Index - 0.5, xmax = Time_Index + 0.5, ymin = 0, ymax = Inf),
+      fill = "#fee2e2", alpha = 0.4, inherit.aes = FALSE
+    ) +
+    # YELLOW ZONE (Suppressed Years)
+    geom_rect(
+      data = df_target %>% filter(Plot_Status == "Abnormal (Low)"),
+      aes(xmin = Time_Index - 0.5, xmax = Time_Index + 0.5, ymin = 0, ymax = Inf),
+      fill = "#fef08a", alpha = 0.4, inherit.aes = FALSE
+    ) +
+    geom_line(aes(y = Cases), color = "#94a3b8", alpha = 0.5, linewidth = 0.8) +
+    geom_line(aes(y = Expected, color = Model), linewidth = 1) +
+    facet_wrap(~ Model, ncol = 1) + 
+    scale_x_continuous(breaks = year_breaks, labels = year_labels) +
+    scale_color_manual(values = c("GAM" = "#2563eb", "NB" = "#16a34a", "STL" = "#d97706")) +
+    labs(
+      title = paste("Continuous Time-Series Analysis:", disease_target, "(2016 - 2025)"),
+      subtitle = "Grey line: Actual | Colored: Expected | Red: Abnormal High | Yellow: Abnormal Low",
+      x = "Timeline (Years)",
+      y = "Epidemiological Cases"
+    ) +
+    theme_hcdc_report() +
+    theme(
+      legend.position = "none",
+      panel.grid.major.x = element_line(color = "black", linetype = "dashed", alpha = 0.3), 
+      strip.background = element_rect(fill = "#1D3557"),
+      strip.text = element_text(color = "white", face = "bold")
+    )
+  
+  return(p)
+}
+```
+
+```{r}
+res_m2 <- run_advanced_multimodel(df_ts_all)
+```
+
+```{r}
+create_mega_table(res_m2$eval, "Dengue")
+```
+
+Dengue bị ảnh hưởng nhiều và phụ thuộc vào khí hậu, dịch chủ yếu xảy ra
+vào mùa mưa nên 1 năm chu kỳ sẽ tính từ tuần 16 năm nay đến tuần 15 năm
+sau. Để đánh giá năm bất thường, (1) Dùng toàn bộ 10 năm dữ liệu để fit
+ra toàn bộ Expected cases mà các mô hình học được; (2) Đánh giá trên
+từng năm, so sánh Actual cases và Expected cases. Sử dụng RMSE và kiểm
+định Wilcoxon để đánh giá.
+
+- Tính RMSE của từng năm
+
+$RMSE = \sqrt{\frac{1}{52} \sum_{i=1}^{52} (\text{Cases}_i - \text{Expected}_i)^2}$
+
+- Tính RMSE trung vị (${RMSE}_m$) của 10 năm
+
+- $RMSE > 1.5 * {RMSE}_m$ ==\> Có thể là năm bất thường
+
+- Để loại trừ khả năng sai số lớn chỉ là do nhiễu ngẫu nhiên (hoặc do
+  một vài tuần đột biến lẻ tẻ), thuật toán chạy kiểm định phi tham số
+  Wilcoxon Signed-Rank trên 52 cặp dữ liệu của năm đó.
+
+Dengue năm 2022 có số ca tăng quá lớn, các mô hình như GAM, NB sẽ bị năm
+2022 này kéo xệch toàn bộ đường Expected cases của 10 năm và tăng phương
+sai của mô hình. Do đó, đợt bùng phát của 2018-2019, 2019-2020 được xem
+là bình thường. Ngược lại mô hình STL trượt dọc theo chuỗi thời gian
+liên tục và linh hoạt tách tính xu hướng ra khỏi tính mùa vụ, nên năm
+2022 sẽ không ảnh hưởng nhiều đến toàn bộ đường Expected cases của 10
+năm, dẫn đến kết quả phát hiện được các năm bất thường 2018-2019,
+2019-2020.
+
+Tuy nhiên, số ca bị chặn bởi ngưỡng dưới là 0 nhưng không có giới hạn
+trên, do đó nếu dùng chỉ số RMSE để đánh giá thì sẽ rất nhạy đối với
+những năm có đợt dịch bùng phát lớn, ngược lại sẽ không thể xác định
+được những năm có số ca quá nhỏ là năm bất thường (Ví dụ HFMD 2016,
+Dengue 2021-2022).
+
+Do đó, để cân bằng sai số giữa trường hợp tăng từ 1.000 lên 10.000 hay
+giảm từ 1.000 xuống 100 thì nhóm đánh giá thêm Log-RMSE và sMAPE
+Symmetric Mean Absolute Percentage Error. Kết hợp 3 chỉ số để đánh giá
+xem một năm là năm bất thường (số ca quá cao hay là số ca quá thấp).
+
+```{r fig.width=9, fig.height=5, fig.dpi=300}
+plot_elite_timeseries(res_m2$plot_data, "Dengue")
+```
+
+```{r}
+create_mega_table(res_m2$eval, "HFMD")
+```
+
+```{r fig.width=9, fig.height=5, fig.dpi=300}
+plot_elite_timeseries(res_m2$plot_data, "HFMD")
+```
