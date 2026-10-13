@@ -53,3 +53,35 @@ prep_continuous_ts <- function(df_cases, disease_name) {
     mutate(Cases = replace_na(Cases, 0))
 }
 
+calc_serfling <- function(df_h, df_t) {
+  tryCatch({
+    df_h <- mutate(df_h, time = row_number())
+    mod <- lm(cases ~ time + sin(2*pi*week/52) + cos(2*pi*week/52), data = df_h)
+    df_t <- mutate(df_t, time = max(df_h$time) + row_number())
+    as.numeric(predict(mod, df_t, interval="prediction", level=0.95)[,"upr"])
+  }, error = function(e) rep(NA, nrow(df_t)))
+}
+
+calc_mem <- function(df_h, df_t) {
+  peaks <- df_h %>% group_by(year) %>% summarise(m = max(cases, na.rm=T)) %>% pull(m)
+  peaks <- peaks[peaks > 0]
+  if(length(peaks) < 2) return(rep(NA, nrow(df_t)))
+  thr <- exp(mean(log(peaks)) + 1.96 * sd(log(peaks)))
+  rep(thr, nrow(df_t))
+}
+
+calc_cdc <- function(df_hist, df_target) {
+  stats <- df_hist %>%
+    group_by(week) %>%
+    summarise(
+      mean_val = mean(cases, na.rm = TRUE),
+      sd_val = sd(cases, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(threshold = mean_val + 2 * sd_val)
+  
+  df_merged <- df_target %>%
+    left_join(stats, by = "week")
+  
+  return(df_merged$threshold)
+}

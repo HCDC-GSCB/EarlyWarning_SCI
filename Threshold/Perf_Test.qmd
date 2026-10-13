@@ -86,3 +86,201 @@ for (ab_year in abnormal_years) {
 # sts_list$`2022-2023`
 ```
 
+## Function algorithms
+
+```{r}
+get_ub <- function(expr, algo_name = "Algo") {
+  tryCatch({
+    # R dùng lazy evaluation, lỗi (nếu có) sẽ bị bắt khi eval(expr)
+    res <- expr 
+    
+    if (inherits(res, "sts")) {
+      return(as.numeric(upperbound(res)))
+    } else if (inherits(res, "survRes")) {
+      return(as.numeric(res$upperbound))
+    } else {
+      return(rep(NA, 52))
+    }
+  }, error = function(e) {
+    message(paste("Lỗi ở", algo_name, ":", conditionMessage(e)))
+    return(rep(NA, 52))
+  })
+}
+
+all_thresholds <- list()
+eval_range <- 261:312 # Tuần của năm thứ 6 (Target Year)
+
+for (ab_year in abnormal_years) {
+  
+  # 1. CHUẨN BỊ DATA 
+  df_abnormal <- sxh_epi %>% filter(Epi_Year == ab_year) %>% arrange(Epi_Week)
+  df_stitched <- bind_rows(df_normal, df_abnormal) %>%
+    rename(cases = Cases, week = Epi_Week, year = Epi_Year)
+  
+  df_h <- df_stitched %>% filter(year %in% normal_years)
+  df_t <- df_stitched %>% filter(year == ab_year)
+  
+  thr_serfling <- calc_serfling(df_h, df_t)
+  thr_mem      <- calc_mem(df_h, df_t)
+  thr_cdc      <- calc_cdc(df_h, df_t)
+  
+  # 2. OBJECT CHO SURVEILLANCE
+  sts_obj <- sts(observed = df_stitched$cases, start = c(1, 1), frequency = 52)
+  
+  # Tạo object disProg cho các thuật toán cũ
+  dp_obj <- sts2disProg(sts_obj) 
+  
+  ctrl <- list(range = eval_range)
+  
+  # Nhóm Basic/RKI/Bayes (Phải dùng dp_obj)
+  thr_rki1   <- get_ub(algo.rki1(dp_obj, control = ctrl), "RKI1")
+  thr_rki2   <- get_ub(algo.rki2(dp_obj, control = ctrl), "RKI2")
+  thr_bayes1 <- get_ub(algo.bayes1(dp_obj, control = ctrl), "Bayes1")
+  thr_bayes2 <- get_ub(algo.bayes2(dp_obj, control = ctrl), "Bayes2")
+  
+  # Nhóm Farrington (Giảm b = 4 để không tràn viền)
+  ctrl_farr <- list(range = eval_range, b = 5, w = 1)
+  thr_farr_old <- get_ub(algo.farrington(dp_obj, control = ctrl_farr), "Farrington")
+  thr_farr_flex <- get_ub(farringtonFlexible(sts_obj, control = ctrl_farr), "FarringtonFlex")
+  
+  # Nhóm EARS (Dùng sts_obj như cũ vì nó hiện đại)
+  thr_ears_c1 <- get_ub(earsC(sts_obj, control = list(range = eval_range, method = "C1")), "EARS_C1")
+  thr_ears_c2 <- get_ub(earsC(sts_obj, control = list(range = eval_range, method = "C2")), "EARS_C2")
+  thr_ears_c3 <- get_ub(earsC(sts_obj, control = list(range = eval_range, method = "C3")), "EARS_C3")
+  
+  # Nhóm GLR & CUSUM (Phải dùng dp_obj)
+  thr_glrnb    <- get_ub(algo.glrnb(dp_obj, control = ctrl), "GLR_NB")
+  thr_glrpois  <- get_ub(algo.glrpois(dp_obj, control = ctrl), "GLR_Pois")
+  thr_cusum    <- get_ub(algo.cusum(dp_obj, control = ctrl), "CUSUM")
+  thr_cusum_rs <- get_ub(algo.cusum(dp_obj, control = list(range = eval_range, trans = "rossi")), "CUSUM_Rossi")
+  thr_cusum_nb <- get_ub(algo.cusum(dp_obj, control = list(range = eval_range, trans = "pearsonNegBin")), "CUSUM_NegBin")
+  
+  # 3. GOM KẾT QUẢ
+  res_df <- data.frame(
+    Target_Year = ab_year,
+    Week = 1:52,
+    Actual_Cases = df_t$cases,
+    Serfling = thr_serfling,
+    MEM = thr_mem,
+    CDC = thr_cdc,
+    RKI1 = thr_rki1,
+    RKI2 = thr_rki2,
+    Bayes1 = thr_bayes1,
+    Bayes2 = thr_bayes2,
+    Farrington = thr_farr_old,
+    Farrington_Flex = thr_farr_flex,
+    EARS_C1 = thr_ears_c1,
+    EARS_C2 = thr_ears_c2,
+    EARS_C3 = thr_ears_c3,
+    GLR_NB = thr_glrnb,
+    GLR_Pois = thr_glrpois,
+    CUSUM = thr_cusum,
+    CUSUM_Rossi = thr_cusum_rs,
+    CUSUM_NegBin = thr_cusum_nb
+  )
+  
+  all_thresholds[[ab_year]] <- res_df
+}
+
+final_thresholds_df <- bind_rows(all_thresholds)
+```
+
+## Visualization
+
+```{r}
+# 1. LOẠI BỎ DỮ LIỆU KHÔNG CẦN THIẾT (GLR và năm 2021-2022)
+df_filtered <- final_thresholds_df %>%
+  filter(Target_Year != "2021-2022") %>%          # Bỏ năm dịch thấp do Covid
+  dplyr::select(-GLR_NB, -GLR_Pois)                      # Bỏ 2 thuật toán GLR
+
+# 2. Chuyển đổi dữ liệu sang dạng dài (long format)
+df_long <- df_filtered %>%
+  pivot_longer(
+    cols = -c(Target_Year, Week, Actual_Cases),
+    names_to = "Algorithm",
+    values_to = "Threshold"
+  )
+
+# 3. CHIA LẠI NHÓM THEO ĐÚNG Ý MÀY
+group_A <- c("CDC", "MEM", "Serfling", "Farrington", "Farrington_Flex")
+
+group_B <- c("Bayes1", "Bayes2", "CUSUM", "CUSUM_NegBin", "CUSUM_Rossi", 
+             "EARS_C1", "EARS_C2", "EARS_C3", "RKI1", "RKI2")
+
+# Tạo theme chung
+my_theme <- theme_bw() +
+  theme(
+    strip.background = element_rect(fill = "lightblue", color = "black"),
+    strip.text = element_text(color = "black", size = 10, face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(size = 12),
+    plot.background = element_rect(fill = "#F2F2F2", color = NA),
+    panel.background = element_rect(fill = "white"),
+    legend.background = element_rect(fill = "#F2F2F2"),
+    legend.key = element_rect(fill = "#F2F2F2"),
+    panel.grid.minor = element_blank()
+  )
+
+# ==============================================================
+# 4. MỞ FILE PDF VÀ VẼ
+pdf("DanhGiaNguongDich_Update.pdf", width = 16, height = 12)
+
+# Lấy danh sách các năm dịch (chỉ còn 3 năm bất thường)
+years <- unique(df_long$Target_Year)
+
+for (y in years) {
+  
+  df_year <- df_long %>% filter(Target_Year == y)
+  
+  df_A <- df_year %>% 
+    filter(Algorithm %in% group_A) %>%
+    mutate(Algorithm = factor(Algorithm, levels = group_A))
+  
+  df_B <- df_year %>% 
+    filter(Algorithm %in% group_B) %>%
+    mutate(Algorithm = factor(Algorithm, levels = group_B))
+  
+  df_actual_A <- df_A %>% distinct(Week, Actual_Cases, Algorithm)
+  df_actual_B <- df_B %>% distinct(Week, Actual_Cases, Algorithm)
+  
+  # --- CỤM A (5 biểu đồ, xếp 3 cột -> chiếm khoảng 2 hàng) ---
+  pA <- ggplot(df_A, aes(x = Week)) +
+    geom_col(data = df_actual_A, aes(y = Actual_Cases, fill = "Cases"), color = NA, alpha = 0.4) +
+    geom_line(aes(y = Threshold, color = "Threshold"), linewidth = 0.8) +
+    facet_wrap(~ Algorithm, ncol = 3, scales = "free_y") +
+    scale_fill_manual(name = "", values = c("Cases" = "grey30")) +
+    scale_color_manual(name = "", values = c("Threshold" = "red")) +
+    labs(title = "(A) Not using current year", x = "", y = "Cases") +
+    my_theme
+  
+  # --- CỤM B (10 biểu đồ, xếp 4 cột -> chiếm khoảng 3 hàng) ---
+  pB <- ggplot(df_B, aes(x = Week)) +
+    geom_col(data = df_actual_B, aes(y = Actual_Cases, fill = "Cases"), color = NA, alpha = 0.4) +
+    geom_line(aes(y = Threshold, color = "Threshold"), linewidth = 0.8) +
+    facet_wrap(~ Algorithm, ncol = 4, scales = "free_y") +
+    scale_fill_manual(name = "", values = c("Cases" = "grey30")) +
+    scale_color_manual(name = "", values = c("Threshold" = "red")) +
+    labs(title = "(B) Using current year", x = "Weeks", y = "Cases") +
+    my_theme
+  
+  # Ghép A và B (Tỷ lệ chiều cao 2:3 cho cân đối)
+  combined_plot <- (pA / pB) +
+    plot_layout(heights = c(2, 3), guides = "collect") & 
+    theme(legend.position = "bottom", legend.text = element_text(size = 12))
+  
+  final_plot <- combined_plot +
+    plot_annotation(
+      title = paste("Year:", y),
+      theme = theme(
+        plot.title = element_text(size = 20, face = "bold"),
+        plot.background = element_rect(fill = "#F2F2F2", color = NA)
+      )
+    )
+  
+  print(final_plot)
+}
+
+dev.off()
+```
+
